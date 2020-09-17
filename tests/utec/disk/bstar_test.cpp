@@ -73,4 +73,13 @@ TEST_F(DiskBasedBstar, Iterators) {
 //  }
 }
 
-
+TEST_F(DiskBasedBstar, Scalability) {
+  std::shared_ptr<pagemanager> pm = std::make_shared<pagemanager>("bstar.index");
+  bstar<int, BSTAR_ORDER> bt(pm);
+  std::fstream random_file;
+  random_file.open("random.txt");
+  long n;
+  while (random_file >> n) {
+    bt.insert(c);
+  }
+}
