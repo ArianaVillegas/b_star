@@ -19,7 +19,12 @@ namespace utec {
         private:
             friend class bstar<T, BSTAR_ORDER>;
 
-            typedef utec::disk::Node<T, BSTAR_ORDER> Node;
+            template <int SIZE = BSTAR_ORDER>
+            using Node = utec::disk::Node<T, SIZE>;
+
+            enum blocksize {
+                F_BLOCK = (2*BSTAR_ORDER-2)/3,
+            };
           
             std::shared_ptr<pagemanager> pm;
 
@@ -28,50 +33,41 @@ namespace utec {
             int index;
             long node_id;
         public:
+            bstariterator(std::shared_ptr<pagemanager> &pm) : 
+                pm(pm), node_id(-1), index(0){}
+
             bstariterator(std::shared_ptr<pagemanager> &pm, long node_id) : 
                 pm(pm), node_id(node_id), index(0) {
                     if(node_id < 1) return;
-                    auto n = read_node(this->node_id);
+                    Node<2*F_BLOCK> n = read_root();
                     q.push({n.page_id,0});
-                    while(n.children[0]){
-                        n = read_node(n.children[0]);
-                        q.push({n.page_id,0});
-                    }
-                    q.pop();
-                    this->index = 0;
-                    this->node_id = n.page_id;
-                }
-
-            bstariterator(std::shared_ptr<pagemanager> &pm, long node_id, const T &key) : 
-                pm(pm), node_id(node_id) {
-                    auto n = read_node(this->node_id);
-                    int lb = 0;
-                    while (lb < n.count && n.keys[lb] < key) {
-                        lb++;
-                    }
-                    q.push({n.page_id, lb});
-                    if(n.keys[lb] != key){
-                        while(n.children[lb]){
-                            n = read_node(n.children[lb]);
-                            lb = 0; 
-                            while (lb < n.count && n.keys[lb] < key) {
-                                lb++;
-                            }
-                            q.push({n.page_id, lb});
-                            if(n.keys[lb] == key) break;
+                    if(n.children[0]){
+                        Node<> nn = read_node(n.children[0]);
+                        q.push({nn.page_id,0});
+                        while(nn.children[0]){
+                            nn = read_node(nn.children[0]);
+                            q.push({nn.page_id,0});
                         }
+                        q.pop();
+                        this->node_id = nn.page_id;
+                    } else {
+                        this->node_id = n.page_id;
                     }
-                    q.pop();
-                    this->index = lb;
-                    this->node_id = n.page_id;
+                    this->index = 0;
                 }
          
             bstariterator(std::shared_ptr<pagemanager> &pm, const bstariterator& other): 
                 pm(pm), node_id(other.node_id), index(other.index), q(other.q) {}
 
-            Node read_node(long page_id) {
-                Node n{-1};
+            Node<> read_node(long page_id) {
+                Node<> n{-1};
                 pm->recover(page_id, n);
+                return n;
+            }
+
+            Node<2*F_BLOCK> read_root() {
+                Node<2*F_BLOCK> n{-1};
+                pm->recover(1, n);
                 return n;
             }
           
@@ -82,20 +78,38 @@ namespace utec {
             }
 
             bstariterator& operator++() {
-                Node n = read_node(this->node_id);
+                Node<> n;
+                Node<2*F_BLOCK> r;
+                if(this->node_id == 1){
+                    r = read_root();
+                } else {
+                    n = read_node(this->node_id);
+                }
 
-                if (n.children[index+1]) {
-                    long id;
-                    n = read_node(n.children[++index]);
-                    while(n.children[0]){
-                        q.push({n.page_id,0});
-                        id = n.children[0];
-                        n = read_node(id);
+                if ((this->node_id != 1 && n.children[index+1])
+                    || (this->node_id == 1 && r.children[index+1])) {
+
+                    if(this->node_id != 1 && index+1 < n.count
+                        || this->node_id == 1 && index+1 < r.count){
+                        q.push({node_id,index+1});
                     }
 
-                    this->node_id = n.page_id;
+                    long id;
+                    Node<> nn;
+                    if(this->node_id != 1)
+                        nn = read_node(n.children[++index]);
+                    else 
+                        nn = read_node(r.children[++index]);
+                    while(nn.children[0]){
+                        q.push({nn.page_id,0});
+                        id = nn.children[0];
+                        nn = read_node(id);
+                    }
+
+                    this->node_id = nn.page_id;
                     this->index = 0;
-                } else if (!(index < n.count-1)) {
+                } else if ((this->node_id != 1 && !(index < n.count-1))
+                    || (this->node_id == 1 && !(index < r.count-1))) {
                     if(q.empty()){
                         node_id = -1;
                         index = 0;
@@ -103,10 +117,7 @@ namespace utec {
                     }
                     node_id = q.top().first;
                     index = q.top().second;
-                    n = read_node(this->node_id);
                     q.pop();
-                    if(index+1 < n.count)
-                        q.push({node_id,index+1});
                 } else {
                     this->index++;
                 }
@@ -129,13 +140,23 @@ namespace utec {
             } 
 
             T operator*() { 
-                Node n = read_node(this->node_id);
-                return n.keys[index]; 
+                if(this->node_id == 1){
+                    Node<2*F_BLOCK> n = read_root();
+                    return n.keys[index]; 
+                } else {
+                    Node<> n = read_node(this->node_id);
+                    return n.keys[index]; 
+                }
             }
 
             long get_page_id() {
-                Node n = read_node(this->node_id);
-                return n.pages[index];
+                if(this->node_id == 1){
+                    Node<2*F_BLOCK> n = read_root();
+                    return n.children[index]; 
+                } else {
+                    Node<> n = read_node(this->node_id);
+                    return n.children[index]; 
+                }
             }
         };
 
@@ -146,8 +167,10 @@ namespace utec {
             long page_id = -1;
             long count = 0;
 
-            T keys[2*(2*BSTAR_ORDER-2)/3 + 1];
-            long children[2*(2*BSTAR_ORDER-2)/3 + 2];
+            T keys[BSTAR_ORDER + 1];
+            long children[BSTAR_ORDER + 2];
+
+            Node() {}
 
             Node(long page_id) : page_id{page_id} {
                 count = 0;
@@ -175,7 +198,11 @@ namespace utec {
         template <class T, int BSTAR_ORDER = 3>
         class bstar {
         public:
-            typedef utec::disk::Node<T, BSTAR_ORDER> Node;
+            friend class bstariterator<T, BSTAR_ORDER>;
+
+            template <int SIZE = BSTAR_ORDER>
+            using Node = utec::disk::Node<T, SIZE>;
+
             typedef bstariterator<T, BSTAR_ORDER> iterator;
 
             enum state {
@@ -199,22 +226,32 @@ namespace utec {
         private:
             std::shared_ptr<pagemanager> pm;
 
-            Node new_node() {
+            Node<> new_node() {
                 header.count++;
-                Node ret{header.count+2};
+                Node<> ret{header.count+1};
                 pm->save(0, header);
                 return ret;
             }
 
-            Node read_node(long page_id) {
-                Node n{-1};
+            Node<> read_node(long page_id) {
+                Node<> n{-1};
                 pm->recover(page_id, n);
                 return n;
             }
 
-            bool write_node(long page_id, Node n) { pm->save(page_id, n);}
+            Node<2*F_BLOCK> read_root() {
+                Node<2*F_BLOCK> n{-1};
+                pm->recover(1, n);
+                return n;
+            }
 
-            void rotateLeft(Node &node, Node &n1, Node &n2, int pos){
+            template <int SIZE>
+            bool write_node(long page_id, Node<SIZE> n) { 
+                pm->save(page_id, n);
+            }
+
+            template <int SIZE>
+            void rotateLeft(Node<SIZE> &node, Node<> &n1, Node<> &n2, int pos){
                 n1.insert_in_node(n1.count, node.keys[pos]);
                 n1.children[n1.count] = n2.children[0];
                 node.keys[pos] = n2.keys[0];
@@ -232,7 +269,8 @@ namespace utec {
                 write_node(n2.page_id, n2);
             }
 
-            void rotateRight(Node &node, Node &n1, Node &n2, int pos){
+            template <int SIZE>
+            void rotateRight(Node<SIZE> &node, Node<> &n1, Node<> &n2, int pos){
                 n1.insert_in_node(0, node.keys[pos]);
                 n1.children[0] = n2.children[n2.count--];
                 node.keys[pos] = n2.keys[n2.count];
@@ -242,7 +280,8 @@ namespace utec {
                 write_node(n2.page_id, n2);
             }
 
-            void split(Node &node, int idx){
+            template <int SIZE>
+            void split(Node<SIZE> &node, int idx){
                 int fidx, sidx;
                 if(idx < node.count){
                     fidx = idx;
@@ -251,9 +290,9 @@ namespace utec {
                     fidx = idx-1;
                     sidx = idx;
                 }
-                Node fnode = read_node(node.children[fidx]);
-                Node snode = read_node(node.children[sidx]);
-                Node tnode = new_node();
+                Node<> fnode = read_node(node.children[fidx]);
+                Node<> snode = read_node(node.children[sidx]);
+                Node<> tnode = new_node();
 
                 int i, s=snode.count-T_BLOCK;
                 for (i = 0; i < T_BLOCK; i++) {
@@ -283,9 +322,9 @@ namespace utec {
                 write_node(tnode.page_id, tnode);
             }
 
-            void split_root(Node &root){
-                Node left = new_node();
-                Node right = new_node();
+            void split_root(Node<2*F_BLOCK> &root){
+                Node<> left = new_node();
+                Node<> right = new_node();
                 T middle = root.keys[F_BLOCK];
                 int i;
 
@@ -311,14 +350,15 @@ namespace utec {
                 write_node(right.page_id, right);
             }
 
-            int insert(T data, Node &node){
+            template <int SIZE>
+            int insert(T data, Node<SIZE> &node){
                 int i;
                 for(i=0; i<node.count; ++i)
                     if(data<=node.keys[i]) break;
                 if(node.children[i]){
-                    Node prev = read_node(node.children[i-1]);
-                    Node temp = read_node(node.children[i]);
-                    Node next = read_node(node.children[i+1]);
+                    Node<> prev = read_node(node.children[i-1]);
+                    Node<> temp = read_node(node.children[i]);
+                    Node<> next = read_node(node.children[i+1]);
                     int status = insert(data,temp);
                     if(status == BT_OVERFLOW){
                         if(i<node.count && next.count < BSTAR_ORDER-1){
@@ -341,11 +381,12 @@ namespace utec {
                 return NORMAL;
             }
 
-            void print_tree(Node &ptr, int level) {
+            template <int SIZE>
+            void print_tree(Node<SIZE> &ptr, int level) {
                 int i;
                 for (i = ptr.count - 1; i >= 0; i--) {
                     if (ptr.children[i + 1]) {
-                        Node child = read_node(ptr.children[i + 1]);
+                        Node<> child = read_node(ptr.children[i + 1]);
                         print_tree(child, level + 1);
                     }
                     for (int k = 0; k < level; k++) {
@@ -354,22 +395,23 @@ namespace utec {
                     std::cout << ptr.keys[i] << "\n";
                 }
                 if (ptr.children[i + 1]) {
-                    Node child = read_node(ptr.children[i + 1]);
+                    Node<> child = read_node(ptr.children[i + 1]);
                     print_tree(child, level + 1);
                 }
             }
 
-            void print(Node &ptr, int level, std::ostream& out) {
+            template <int SIZE>
+            void print(Node<SIZE> &ptr, int level, std::ostream& out) {
                 int i;
                 for (i = 0; i < ptr.count; i++) {
                     if (ptr.children[i]) {
-                        Node child = read_node(ptr.children[i]);
+                        Node<> child = read_node(ptr.children[i]);
                         print(child, level + 1, out);
                     }
                     out << ptr.keys[i];
                 }
                 if (ptr.children[i]) {
-                    Node child = read_node(ptr.children[i]);
+                    Node<> child = read_node(ptr.children[i]);
                     print(child, level + 1, out);
                 }
             }
@@ -377,7 +419,7 @@ namespace utec {
         public:
             bstar(std::shared_ptr<pagemanager> pm) : pm{pm} {
                 if (pm->is_empty()) {
-                    Node root{header.root_id};
+                    Node<2*F_BLOCK> root{header.root_id};
                     pm->save(root.page_id, root);
 
                     header.count++;
@@ -389,7 +431,7 @@ namespace utec {
             }
 
             void insert(T k) {
-                Node root = read_node(header.root_id);
+                Node<2*F_BLOCK> root = read_root();
                 insert(k,root);
                 if(root.count > F_BLOCK*2){
                     split_root(root);
@@ -398,32 +440,45 @@ namespace utec {
             }
 
             iterator find(const T &key) {
-                Node ptr = this->read_node(header.root_id);
-                int pos = 0;
+                iterator it(this->pm);
 
-                while (ptr.children[0]) {
-                    pos = 0;
-                    while (pos < ptr.count && ptr.keys[pos] < key) {
-                        pos++;
-                    }
-                    if(ptr.keys[pos] == key) break;
-                    ptr = this->read_node(ptr.children[pos]);
+                Node<2*F_BLOCK> n = read_root();
+                int lb = 0;
+                while (lb < n.count && n.keys[lb] < key) {
+                    lb++;
                 }
-
-                if(ptr.keys[pos] != key){
-                    pos = 0;
-                    while (pos < ptr.count && ptr.keys[pos] < key) {
-                        pos++;
+                if(n.keys[lb] != key){
+                    it.q.push({n.page_id, lb});
+                    if(n.children[lb]){
+                        Node<> nn = read_node(n.children[lb]);
+                        lb = 0; 
+                        while (lb < nn.count && nn.keys[lb] < key) {
+                            lb++;
+                        }
+                        if(nn.keys[lb] != key){
+                            it.q.push({nn.page_id, lb});
+                            while(nn.children[lb]){
+                                nn = read_node(nn.children[lb]);
+                                lb = 0; 
+                                while (lb < nn.count && nn.keys[lb] < key) {
+                                    lb++;
+                                }
+                                it.q.push({nn.page_id, lb});
+                                if(nn.keys[lb] == key) break;
+                            }
+                            it.q.pop();
+                        }
+                        if(nn.keys[lb] != key){
+                            return it;
+                        }
+                        it.node_id = nn.page_id;
                     }
-                }
-
-                if(pos < ptr.count && ptr.keys[pos] == key){
-                    iterator it(this->pm, header.root_id, key);
                     return it;
                 } else {
-                    iterator it(this->pm, -1);
-                    return it;
+                    it.node_id = n.page_id;
                 }
+                it.index = lb;
+                return it;
             }
 
             iterator begin() {
@@ -437,13 +492,13 @@ namespace utec {
             }
 
             void print_tree() {
-                Node root = read_node(header.root_id);
+                Node<2*F_BLOCK> root = read_root();
                 print_tree(root, 0);
                 std::cout << "________________________\n";
             }
             
             void print(std::ostream& out) {
-                Node root = read_node(header.root_id);
+                Node<2*F_BLOCK> root = read_root();
                 print(root, 0, out);
             }
 
