@@ -79,7 +79,7 @@ TEST_F(DiskBasedBstar, Scalability) {
   std::fstream random_file;
   random_file.open("random.txt");
   long n;
-  while (random_file >> n) {
+  /*while (random_file >> n) {
     bt.insert(c);
-  }
+  }*/
 }

@@ -17,8 +17,6 @@ namespace utec {
         template <class T, int BSTAR_ORDER = 3>
         class bstariterator {
         private:
-            friend class bstar<T, BSTAR_ORDER>;
-
             template <int SIZE = BSTAR_ORDER>
             using Node = utec::disk::Node<T, SIZE>;
 
@@ -38,26 +36,78 @@ namespace utec {
 
             bstariterator(std::shared_ptr<pagemanager> &pm, long node_id) : 
                 pm(pm), node_id(node_id), index(0) {
-                    if(node_id < 1) return;
-                    Node<2*F_BLOCK> n = read_root();
-                    q.push({n.page_id,0});
-                    if(n.children[0]){
-                        Node<> nn = read_node(n.children[0]);
-                        q.push({nn.page_id,0});
-                        while(nn.children[0]){
-                            nn = read_node(nn.children[0]);
-                            q.push({nn.page_id,0});
-                        }
-                        q.pop();
-                        this->node_id = nn.page_id;
-                    } else {
-                        this->node_id = n.page_id;
+                
+                Node<2*F_BLOCK> n = read_root();
+                if(n.children[0]){
+                    this->q.push({n.page_id,0});
+                    Node<> nn = read_node(n.children[0]);
+                    while(nn.children[0]){
+                        this->q.push({nn.page_id,0});
+                        nn = read_node(nn.children[0]);
                     }
-                    this->index = 0;
+                    this->node_id = nn.page_id;
+                } else {
+                    this->node_id = n.page_id;
                 }
+                this->index = 0;
+            
+            }
          
             bstariterator(std::shared_ptr<pagemanager> &pm, const bstariterator& other): 
                 pm(pm), node_id(other.node_id), index(other.index), q(other.q) {}
+
+            void find(const T &key) {
+                Node<2*F_BLOCK> n = read_root();
+                int lb = 0;
+                while (lb < n.count && n.keys[lb] < key) {
+                    lb++;
+                }
+
+                if(n.keys[lb] == key){
+                    node_id = n.page_id;
+                    index = lb;
+                    return;
+                }
+
+                if(!n.children[lb]){
+                    node_id = -1;
+                    index = 0;
+                    return;
+                }
+
+                if(lb < n.count) q.push({n.page_id, lb});
+
+                Node<> nn = read_node(n.children[lb]);
+                lb = 0;
+                while (lb < nn.count && nn.keys[lb] < key) {
+                    lb++;
+                }
+
+                if(nn.keys[lb] == key){
+                    node_id = nn.page_id;
+                    index = lb;
+                    return;
+                }
+
+                while(nn.children[lb]){
+                    if(lb < nn.count) q.push({nn.page_id, lb});
+                    nn = read_node(nn.children[lb]);
+                    lb = 0; 
+                    while (lb < nn.count && nn.keys[lb] < key) {
+                        lb++;
+                    }
+                    if(nn.keys[lb] == key) break;
+                }
+
+                if(nn.keys[lb] != key){
+                    node_id = -1;
+                    index = 0;
+                    q.empty();
+                } else {
+                    node_id = nn.page_id;
+                    index = lb;
+                }
+            }
 
             Node<> read_node(long page_id) {
                 Node<> n{-1};
@@ -85,7 +135,6 @@ namespace utec {
                 } else {
                     n = read_node(this->node_id);
                 }
-
                 if ((this->node_id != 1 && n.children[index+1])
                     || (this->node_id == 1 && r.children[index+1])) {
 
@@ -198,8 +247,6 @@ namespace utec {
         template <class T, int BSTAR_ORDER = 3>
         class bstar {
         public:
-            friend class bstariterator<T, BSTAR_ORDER>;
-
             template <int SIZE = BSTAR_ORDER>
             using Node = utec::disk::Node<T, SIZE>;
 
@@ -381,6 +428,8 @@ namespace utec {
                 return NORMAL;
             }
 
+
+
             template <int SIZE>
             void print_tree(Node<SIZE> &ptr, int level) {
                 int i;
@@ -441,43 +490,7 @@ namespace utec {
 
             iterator find(const T &key) {
                 iterator it(this->pm);
-
-                Node<2*F_BLOCK> n = read_root();
-                int lb = 0;
-                while (lb < n.count && n.keys[lb] < key) {
-                    lb++;
-                }
-                if(n.keys[lb] != key){
-                    it.q.push({n.page_id, lb});
-                    if(n.children[lb]){
-                        Node<> nn = read_node(n.children[lb]);
-                        lb = 0; 
-                        while (lb < nn.count && nn.keys[lb] < key) {
-                            lb++;
-                        }
-                        if(nn.keys[lb] != key){
-                            it.q.push({nn.page_id, lb});
-                            while(nn.children[lb]){
-                                nn = read_node(nn.children[lb]);
-                                lb = 0; 
-                                while (lb < nn.count && nn.keys[lb] < key) {
-                                    lb++;
-                                }
-                                it.q.push({nn.page_id, lb});
-                                if(nn.keys[lb] == key) break;
-                            }
-                            it.q.pop();
-                        }
-                        if(nn.keys[lb] != key){
-                            return it;
-                        }
-                        it.node_id = nn.page_id;
-                    }
-                    return it;
-                } else {
-                    it.node_id = n.page_id;
-                }
-                it.index = lb;
+                it.find(key);
                 return it;
             }
 
@@ -487,7 +500,7 @@ namespace utec {
             }
 
             iterator end() {
-                iterator it(this->pm, -1);
+                iterator it(this->pm);
                 return it;
             }
 

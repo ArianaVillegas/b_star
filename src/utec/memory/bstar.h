@@ -67,13 +67,62 @@ namespace utec {
                 }
             }
 
-            void merge(Node* node, Node* n1, Node* n2, int n3, int pos1, int pos2){
-                n1->keys.insert(n1->keys.begin()+pos1,node->keys[n3]);
-                node->keys.erase(node->keys.begin()+n3);
-                n1->keys.insert(n1->keys.begin()+pos1,n2->keys.begin(),n2->keys.end());
-                if(!n2->isLeaf) {
-                    n1->children.insert(n1->children.begin()+pos1+pos2,n2->children.begin(),n2->children.end());
-                }
+            void merge(Node* node, Node* n1, Node* n2, Node* n3, int pos){
+
+                vector<T> keys;
+                vector<Node*> children;
+
+                // JOIN TO SPLIT
+
+                keys.insert(keys.end(), n1->keys.begin(), n1->keys.end());
+                children.insert(children.end(), n1->children.begin(), n1->children.end());
+
+                keys.insert(keys.end(), node->keys[pos]);
+
+                keys.insert(keys.end(), n2->keys.begin(), n2->keys.end());
+                children.insert(children.end(), n2->children.begin(), n2->children.end());
+
+                keys.insert(keys.end(), node->keys[pos+1]);
+
+                keys.insert(keys.end(), n3->keys.begin(), n3->keys.end());
+                children.insert(children.end(), n3->children.begin(), n3->children.end());
+
+                // EMPTY VECTORS KEYS AND CHILDREN
+
+                n1->keys.clear(); n1->children.clear();
+                n2->keys.clear(); n2->children.clear();
+
+                // SPLIT
+
+                n1->keys.insert(n1->keys.end(), keys.begin(), keys.begin() + BTREE_ORDER - 1);
+                if(!children.empty())
+                    n1->children.insert(n1->children.end(), children.begin(), children.begin() + BTREE_ORDER);
+
+                node->keys[pos] = keys[BTREE_ORDER - 1];
+
+                n2->keys.insert(n2->keys.end(), keys.begin() + BTREE_ORDER, keys.end());
+                if(!children.empty())
+                    n2->children.insert(n2->children.end(), children.begin() + BTREE_ORDER, children.end());
+
+                // ERASE 3RD NODE
+
+                delete node->children[pos + 2]; 
+                node->children.erase(node->children.begin() + pos + 2);
+                node->keys.erase(node->keys.begin() + pos + 1);
+
+            }
+
+            void mergeRoot(Node* node, Node* n1, Node* n2){
+
+                n1->keys.insert(n1->keys.end(), node->keys[0]);
+                n1->keys.insert(n1->keys.end(), n2->keys.begin(), n2->keys.end());
+                n1->children.insert(n1->children.end(), n2->children.begin(), n2->children.end());
+
+                delete node->children[1];
+                delete root;
+
+                this->root = n1;
+
             }
 
             void split(Node* node, int idx){
@@ -150,16 +199,83 @@ namespace utec {
                 if(i<node->keys.size() && data == node->keys[i]) temp=&node->keys[i];
                 if(!remove(data,temp,node->children[i])) return false;
                 auto size=node->children[i]->keys.size();
-                if(size<(BTREE_ORDER/2)){
-                    if(i && node->children[i-1]->keys.size()>(BTREE_ORDER/2)){
-                        rotate(node,node->children[i],node->children[i-1],i-1,node->children[i-1]->keys.size()-1,0,0,1);
-                    } else if((i+1)<node->children.size() && node->children[i+1]->keys.size()>(BTREE_ORDER/2)){
-                        rotate(node,node->children[i],node->children[i+1],i,0,size,1,0);
+                
+                //NEW MODIFICATIONS
+
+                if(size < F_BLOCK){
+
+                    if(i==0) {
+
+                        auto size_r=node->children[i+1]->keys.size();
+
+                        if(size_r > F_BLOCK){
+
+                            rotate(node,node->children[i],node->children[i+1],i,0,size,1,0);
+                        
+                        } else if(node->children.size() > 2 && node->children[i+2]->keys.size() > F_BLOCK){
+
+                            rotate(node,node->children[i+1],node->children[i+2],i+1,0,size_r,1,0);
+                            size=node->children[i]->keys.size();
+                            rotate(node,node->children[i],node->children[i+1],i,0,size,1,0);
+
+                        } else {
+
+                            if(node == root && node->keys.size() == 1) {
+                                mergeRoot(node, node->children[0], node->children[1]);
+                            } else {
+                                merge(node, node->children[i], node->children[i+1], node->children[i+2], i);
+                            }
+
+                        }
+
+                    } else if(i+1==node->children.size()){
+
+                        auto size_l=node->children[i-1]->keys.size();
+
+                        if(size_l > F_BLOCK){
+                            auto size_l=node->children[i-1]->keys.size();
+
+                            rotate(node,node->children[i],node->children[i-1],i-1,size_l-1,0,0,1);
+                        
+                        } else if(node->children.size() > 2 && node->children[i-2]->keys.size() > F_BLOCK){
+                            auto size_l2=node->children[i-2]->keys.size();
+
+                            rotate(node,node->children[i-1],node->children[i-2],i-2,size_l2-1,0,0,1);
+                            size_l=node->children[i-1]->keys.size();
+                            rotate(node,node->children[i],node->children[i-1],i-1,size_l-1,0,0,1);
+
+                        } else {
+
+                            if(node == root && node->keys.size() == 1) {
+                                mergeRoot(node, node->children[0], node->children[1]);
+                            } else {
+                                merge(node, node->children[i-2], node->children[i-1], node->children[i], i-2);
+                            }
+
+                        }
+
                     } else {
-                        if(i) merge(node,node->children[i-1],node->children[i],i-1,node->children[i-1]->keys.size(),1);
-                        else merge(node,node->children[i+1],node->children[i],i,0,0);
-                        delete node->children[i]; node->children.erase(node->children.begin()+i);
-                        if(node == root && root->keys.empty()) {root=root->children.front();delete node;}
+
+                        auto size_l=node->children[i-1]->keys.size();
+
+                        if(node->children[i-1]->keys.size() > F_BLOCK){
+
+                            rotate(node,node->children[i],node->children[i-1],i-1,size_l-1,0,0,1);
+                        
+                        } else if(node->children[i+1]->keys.size() > F_BLOCK){
+
+                            rotate(node,node->children[i],node->children[i+1],i,0,size,1,0);
+
+                        } else {
+
+                            if(node == root && node->keys.size() == 1) {
+                                mergeRoot(node, node->children[0], node->children[1]);
+                            } else {
+                                merge(node, node->children[i-1], node->children[i], node->children[i+1], i-1);
+                            }
+
+                        }
+
                     }
                 }
                 return true;
