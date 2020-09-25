@@ -428,6 +428,254 @@ namespace utec {
                 return NORMAL;
             }
 
+            template <int SIZE>
+            void merge(Node<SIZE> &node, Node<> &n1, Node<> &n2, Node<> &n3, int pos){
+
+                T keys[2*(BSTAR_ORDER+1)];
+                long children[2*(BSTAR_ORDER+2)];
+
+                // JOIN TO SPLIT
+
+                int i, j;
+                for(i=0; i<n1.count; i++){
+                    keys[i] = n1.keys[i];
+                    children[i] = n1.children[i];
+                }
+                children[i] = n1.children[i];
+
+                keys[i] = node.keys[pos];
+                i++;
+
+                for(j=0; j<n2.count; i++, j++){
+                    keys[i] = n2.keys[j];
+                    children[i] = n2.children[j];
+                }
+                children[i] = n2.children[j];
+
+                keys[i] = node.keys[pos+1];
+                i++;
+
+                for(j=0; j<n3.count; i++,j++){
+                    keys[i] = n3.keys[j];
+                    children[i] = n3.children[j];
+                }
+                children[i] = n3.children[j];
+
+                // SPLIT
+
+                int size = i;
+
+                for(i=0; i<BSTAR_ORDER-1; i++){
+                    n1.keys[i] = keys[i];
+                    n1.children[i] = children[i];
+                }
+                n1.children[i] = children[i];
+                n1.count = BSTAR_ORDER-1;
+
+                node.keys[pos] = keys[i];
+                i++;
+
+                for(j=0; i<size; i++, j++){
+                    n2.keys[j] = keys[i];
+                    n2.children[j] = children[i];
+                }
+                n2.children[j] = children[i];
+                n2.count = size - BSTAR_ORDER;
+
+                // ERASE 3RD NODE
+
+                for(i=pos+2; i<node.count; i++){
+                    node.keys[i-1] = node.keys[i];
+                    node.children[i] = node.children[i+1];
+                }
+                node.count--;
+            }
+
+            template <int SIZE>
+            void mergeRoot(Node<SIZE> &node){
+                Node<> n1 = read_node(node.children[0]); 
+                Node<> n2 = read_node(node.children[1]);
+
+                node.keys[n1.count] = node.keys[0];
+
+                int i, j;
+                for(i=0; i<n1.count; i++){
+                    node.keys[i] = n1.keys[i];
+                    node.children[i] = n1.children[i];
+                }
+                node.children[i] = n1.children[i];
+                node.count += n1.count;
+                i++;
+
+                for(j=0; j<n2.count; i++){
+                    node.keys[i] = n2.keys[j];
+                    node.children[i] = n2.children[j++];
+                }
+                node.children[i] = n2.children[j];
+                node.count += n2.count;
+            }
+
+
+            template <int SIZE>
+            bool remove(T data, T* &temp, Node<SIZE> &node){
+                int i;
+                
+                for(i=0; i<node.count; ++i){
+                    if(data<=node.keys[i]) break;
+                }
+
+                if(!node.children[i]){
+                    if(data != node.keys[i] && !temp) 
+                        return false;
+                    if(i==node.count) --i;
+                    if(temp && *temp != node.keys[i]) {
+                        swap(*temp,node.keys[i]);
+                    }
+                    for(int idx=i; idx<node.count; idx++){
+                        node.keys[idx] = node.keys[idx+1];
+                    }
+                    node.count--;
+                    write_node(node.page_id, node);
+                    return true;
+                }
+
+                if(i<node.count && data == node.keys[i]) temp=&node.keys[i];
+                Node<> n = read_node(node.children[i]);
+                if(!remove(data,temp,n)) return false;
+                
+                write_node(n.page_id, n);
+                write_node(node.page_id, node);
+                
+                //NEW MODIFICATIONS
+
+                auto size = n.count;
+
+                if(size < F_BLOCK){
+
+                    if(i==0) {
+                        Node<> next, next2;
+                        next = read_node(node.children[i+1]);    
+                        if(node.count > 1) next2 = read_node(node.children[i+2]);
+
+                        auto size_r = next.count;
+
+                        if(size_r > F_BLOCK){
+
+                            rotateLeft(node,n,next,i);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(next.page_id, next);
+                        
+                        } else if(node.count > 1 && next2.count > F_BLOCK){
+
+                            rotateLeft(node,next,next2,i+1);
+                            size = n.count;
+                            rotateLeft(node,n,next,i);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(next.page_id, next);
+                            write_node(next2.page_id, next2);
+
+                        } else {
+
+                            if(node.page_id == 1 && node.count == 1) {
+                                mergeRoot(node);
+                            } else {
+                                merge(node, n, next, next2, i);
+                                write_node(n.page_id, n);
+                                write_node(next.page_id, next);
+                                write_node(next2.page_id, next2);
+                            }
+                            write_node(node.page_id, node);
+
+                        }
+
+                    } else if(i==node.count){
+                        Node<> prev, prev2;
+                        prev = read_node(node.children[i-1]);    
+                        if(node.count > 1) prev2 = read_node(node.children[i-2]);
+
+                        auto size_l = prev.count;
+
+                        if(size_l > F_BLOCK){
+
+                            rotateRight(node,n,prev,i-1);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(prev.page_id, prev);
+                        
+                        } else if(node.count > 1 && prev2.count > F_BLOCK){
+                            
+                            auto size_l2 = prev2.count;
+
+                            rotateRight(node,prev,prev2,i-2);
+                            size = n.count;
+                            rotateRight(node,n,prev,i-1);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(prev.page_id, prev);
+                            write_node(prev2.page_id, prev2);
+
+                        } else {
+
+                            if(node.page_id == 1 && node.count == 1) {
+                                mergeRoot(node);
+                            } else {
+                                merge(node, prev2, prev, n, i-2);
+                                write_node(n.page_id, n);
+                                write_node(prev.page_id, prev);
+                                write_node(prev2.page_id, prev2);
+                            }
+                            write_node(node.page_id, node);
+
+                        }
+
+                    } else {
+
+                        Node<> prev, next;
+                        prev = read_node(node.children[i-1]);    
+                        next = read_node(node.children[i+1]);
+
+                        auto size_l = prev.count;
+                        auto size_r = next.count;
+
+                        if(size_l > F_BLOCK){
+
+                            rotateRight(node,n,prev,i-1);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(prev.page_id, prev);
+                        
+                        } else if(size_r > F_BLOCK){
+
+                            rotateLeft(node,n,next,i);
+
+                            write_node(node.page_id, node);
+                            write_node(n.page_id, n);
+                            write_node(next.page_id, next);
+
+                        } else {
+
+                            if(node.page_id == 1 && node.count == 1) {
+                                mergeRoot(node);
+                            } else {
+                                merge(node, prev, n, next, i-1);
+                                write_node(n.page_id, n);
+                                write_node(next.page_id, next);
+                                write_node(prev.page_id, prev);
+                            }
+                            write_node(node.page_id, node);
+                        }
+                    }
+                }
+                return true;
+            }
+
 
 
             template <int SIZE>
@@ -486,6 +734,12 @@ namespace utec {
                     split_root(root);
                 }
                 write_node(root.page_id, root);
+            }
+
+            bool remove(T k) {
+                T *temp=0;
+                Node<2*F_BLOCK> root = read_root();
+                return remove(k,temp,root);
             }
 
             iterator find(const T &key) {

@@ -202,7 +202,7 @@ namespace utec {
                 
                 //NEW MODIFICATIONS
 
-                if(size < F_BLOCK){
+                if(size < S_BLOCK){
 
                     if(i==0) {
 
