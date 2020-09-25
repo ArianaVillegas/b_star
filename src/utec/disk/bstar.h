@@ -241,6 +241,17 @@ namespace utec {
 
                 count++;
             }
+
+            template <int SIZE>
+            void copy(Node<T, SIZE> &node, int s, int e, int j) {
+                int i;
+                for (i = s; i < e; i++) {
+                    keys[i] = node.keys[j+i];
+                    children[i] = node.children[j+i];
+                }
+                children[i] = node.children[j+i];
+
+            }
         };  
 
 
@@ -304,12 +315,7 @@ namespace utec {
                 node.keys[pos] = n2.keys[0];
                 n2.count--;
 
-                int i;
-                for (i=0; i < n2.count; i++) {
-                    n2.keys[i] = n2.keys[i + 1];
-                    n2.children[i] = n2.children[i + 1];
-                }
-                n2.children[i] = n2.children[i + 1];
+                n2.copy(n2, 0, n2.count, 1);
 
                 write_node(node.page_id, node);
                 write_node(n1.page_id, n1);
@@ -342,11 +348,7 @@ namespace utec {
                 Node<> tnode = new_node();
 
                 int i, s=snode.count-T_BLOCK;
-                for (i = 0; i < T_BLOCK; i++) {
-                    tnode.keys[i] = snode.keys[s+i];
-                    tnode.children[i] = snode.children[s+i];
-                }
-                tnode.children[i] = snode.children[s+i];
+                tnode.copy(snode, 0, T_BLOCK, s);
                 snode.count -= T_BLOCK; tnode.count += T_BLOCK;
 
                 snode.insert_in_node(0, node.keys[fidx]);
@@ -373,20 +375,11 @@ namespace utec {
                 Node<> left = new_node();
                 Node<> right = new_node();
                 T middle = root.keys[F_BLOCK];
-                int i;
-
-                for (i = 0; i < F_BLOCK; i++) {
-                    left.keys[i] = root.keys[i];
-                    left.children[i] = root.children[i];
-                }
-                left.children[i] = root.children[i];
+                
+                left.copy(root, 0, F_BLOCK, 0);
                 left.count = F_BLOCK; root.count -= F_BLOCK;
 
-                for (i = 0; i < F_BLOCK; i++) {
-                    right.keys[i] = root.keys[F_BLOCK+i+1];
-                    right.children[i] = root.children[F_BLOCK+i+1];
-                }
-                right.children[i] = root.children[F_BLOCK+i+1];
+                right.copy(root, 0, F_BLOCK, F_BLOCK+1);
                 right.count = F_BLOCK; root.count -= F_BLOCK;
 
                 root.keys[0] = middle;
@@ -431,64 +424,36 @@ namespace utec {
             template <int SIZE>
             void merge(Node<SIZE> &node, Node<> &n1, Node<> &n2, Node<> &n3, int pos){
 
-                T keys[2*(BSTAR_ORDER+1)];
-                long children[2*(BSTAR_ORDER+2)];
+                Node<2*BSTAR_ORDER> tmp;
 
-                // JOIN TO SPLIT
-
-                int i, j;
-                for(i=0; i<n1.count; i++){
-                    keys[i] = n1.keys[i];
-                    children[i] = n1.children[i];
-                }
-                children[i] = n1.children[i];
-
-                keys[i] = node.keys[pos];
-                i++;
-
-                for(j=0; j<n2.count; i++, j++){
-                    keys[i] = n2.keys[j];
-                    children[i] = n2.children[j];
-                }
-                children[i] = n2.children[j];
-
-                keys[i] = node.keys[pos+1];
-                i++;
-
-                for(j=0; j<n3.count; i++,j++){
-                    keys[i] = n3.keys[j];
-                    children[i] = n3.children[j];
-                }
-                children[i] = n3.children[j];
-
-                // SPLIT
+                int i=0, j=0;
+                tmp.copy(n1, 0, n1.count, 0);
+                i += n1.count;
+                tmp.keys[i++] = node.keys[pos];
+                tmp.copy(n2, i, i+n2.count, -i);
+                i += n2.count;
+                tmp.keys[i++] = node.keys[pos+1];
+                tmp.copy(n3, i, i+n3.count, -i);
+                i += n3.count;
 
                 int size = i;
 
-                for(i=0; i<BSTAR_ORDER-1; i++){
-                    n1.keys[i] = keys[i];
-                    n1.children[i] = children[i];
-                }
-                n1.children[i] = children[i];
+                n1.copy(tmp, 0, BSTAR_ORDER-1, 0);
                 n1.count = BSTAR_ORDER-1;
-
-                node.keys[pos] = keys[i];
-                i++;
-
-                for(j=0; i<size; i++, j++){
-                    n2.keys[j] = keys[i];
-                    n2.children[j] = children[i];
-                }
-                n2.children[j] = children[i];
+                node.keys[pos] = tmp.keys[BSTAR_ORDER-1];
+                n2.copy(tmp, 0, size - BSTAR_ORDER, BSTAR_ORDER);
                 n2.count = size - BSTAR_ORDER;
-
-                // ERASE 3RD NODE
 
                 for(i=pos+2; i<node.count; i++){
                     node.keys[i-1] = node.keys[i];
                     node.children[i] = node.children[i+1];
                 }
                 node.count--;
+
+                write_node(node.page_id, node);
+                write_node(n1.page_id, n1);
+                write_node(n2.page_id, n2);
+                write_node(n3.page_id, n3);
             }
 
             template <int SIZE>
@@ -497,22 +462,14 @@ namespace utec {
                 Node<> n2 = read_node(node.children[1]);
 
                 node.keys[n1.count] = node.keys[0];
-
-                int i, j;
-                for(i=0; i<n1.count; i++){
-                    node.keys[i] = n1.keys[i];
-                    node.children[i] = n1.children[i];
-                }
-                node.children[i] = n1.children[i];
+                node.copy(n1, 0, n1.count, 0);
                 node.count += n1.count;
-                i++;
-
-                for(j=0; j<n2.count; i++){
-                    node.keys[i] = n2.keys[j];
-                    node.children[i] = n2.children[j++];
-                }
-                node.children[i] = n2.children[j];
+                node.copy(n2, n1.count+1, n2.count+n1.count+1, -n1.count-1);
                 node.count += n2.count;
+
+                write_node(node.page_id, node);
+                write_node(n1.page_id, n1);
+                write_node(n2.page_id, n2);
             }
 
 
@@ -545,13 +502,9 @@ namespace utec {
                 
                 write_node(n.page_id, n);
                 write_node(node.page_id, node);
-                
-                //NEW MODIFICATIONS
 
                 auto size = n.count;
-
                 if(size < F_BLOCK){
-
                     if(i==0) {
                         Node<> next, next2;
                         next = read_node(node.children[i+1]);    
@@ -562,10 +515,6 @@ namespace utec {
                         if(size_r > F_BLOCK){
 
                             rotateLeft(node,n,next,i);
-
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(next.page_id, next);
                         
                         } else if(node.count > 1 && next2.count > F_BLOCK){
 
@@ -573,23 +522,13 @@ namespace utec {
                             size = n.count;
                             rotateLeft(node,n,next,i);
 
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(next.page_id, next);
-                            write_node(next2.page_id, next2);
-
                         } else {
 
                             if(node.page_id == 1 && node.count == 1) {
                                 mergeRoot(node);
                             } else {
                                 merge(node, n, next, next2, i);
-                                write_node(n.page_id, n);
-                                write_node(next.page_id, next);
-                                write_node(next2.page_id, next2);
                             }
-                            write_node(node.page_id, node);
-
                         }
 
                     } else if(i==node.count){
@@ -602,10 +541,6 @@ namespace utec {
                         if(size_l > F_BLOCK){
 
                             rotateRight(node,n,prev,i-1);
-
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(prev.page_id, prev);
                         
                         } else if(node.count > 1 && prev2.count > F_BLOCK){
                             
@@ -615,22 +550,13 @@ namespace utec {
                             size = n.count;
                             rotateRight(node,n,prev,i-1);
 
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(prev.page_id, prev);
-                            write_node(prev2.page_id, prev2);
-
                         } else {
 
                             if(node.page_id == 1 && node.count == 1) {
                                 mergeRoot(node);
                             } else {
                                 merge(node, prev2, prev, n, i-2);
-                                write_node(n.page_id, n);
-                                write_node(prev.page_id, prev);
-                                write_node(prev2.page_id, prev2);
                             }
-                            write_node(node.page_id, node);
 
                         }
 
@@ -646,18 +572,10 @@ namespace utec {
                         if(size_l > F_BLOCK){
 
                             rotateRight(node,n,prev,i-1);
-
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(prev.page_id, prev);
                         
                         } else if(size_r > F_BLOCK){
 
                             rotateLeft(node,n,next,i);
-
-                            write_node(node.page_id, node);
-                            write_node(n.page_id, n);
-                            write_node(next.page_id, next);
 
                         } else {
 
@@ -665,11 +583,7 @@ namespace utec {
                                 mergeRoot(node);
                             } else {
                                 merge(node, prev, n, next, i-1);
-                                write_node(n.page_id, n);
-                                write_node(next.page_id, next);
-                                write_node(prev.page_id, prev);
                             }
-                            write_node(node.page_id, node);
                         }
                     }
                 }
