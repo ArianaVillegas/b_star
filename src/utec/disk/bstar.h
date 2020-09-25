@@ -511,74 +511,52 @@ namespace utec {
                         if(node.count > 1) next2 = read_node(node.children[i+2]);
 
                         auto size_r = next.count;
-
                         if(size_r > F_BLOCK){
-
                             rotateLeft(node,n,next,i);
-                        
                         } else if(node.count > 1 && next2.count > F_BLOCK){
-
                             rotateLeft(node,next,next2,i+1);
                             size = n.count;
                             rotateLeft(node,n,next,i);
-
                         } else {
-
                             if(node.page_id == 1 && node.count == 1) {
                                 mergeRoot(node);
                             } else {
                                 merge(node, n, next, next2, i);
                             }
                         }
-
                     } else if(i==node.count){
                         Node<> prev, prev2;
                         prev = read_node(node.children[i-1]);    
                         if(node.count > 1) prev2 = read_node(node.children[i-2]);
 
                         auto size_l = prev.count;
-
                         if(size_l > F_BLOCK){
-
                             rotateRight(node,n,prev,i-1);
-                        
                         } else if(node.count > 1 && prev2.count > F_BLOCK){
-                            
                             auto size_l2 = prev2.count;
-
                             rotateRight(node,prev,prev2,i-2);
                             size = n.count;
                             rotateRight(node,n,prev,i-1);
-
                         } else {
-
                             if(node.page_id == 1 && node.count == 1) {
                                 mergeRoot(node);
                             } else {
                                 merge(node, prev2, prev, n, i-2);
                             }
-
                         }
 
                     } else {
-
                         Node<> prev, next;
                         prev = read_node(node.children[i-1]);    
                         next = read_node(node.children[i+1]);
 
                         auto size_l = prev.count;
                         auto size_r = next.count;
-
                         if(size_l > F_BLOCK){
-
                             rotateRight(node,n,prev,i-1);
-                        
                         } else if(size_r > F_BLOCK){
-
                             rotateLeft(node,n,next,i);
-
                         } else {
-
                             if(node.page_id == 1 && node.count == 1) {
                                 mergeRoot(node);
                             } else {
