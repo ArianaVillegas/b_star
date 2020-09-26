@@ -3,6 +3,7 @@
 #include "pagemanager.h"
 #include <memory>
 #include <stack>
+#include <queue>
 
 namespace utec {
 
@@ -215,6 +216,7 @@ namespace utec {
         public:
             long page_id = -1;
             long count = 0;
+            long erase = -1;
 
             T keys[BSTAR_ORDER + 1];
             long children[BSTAR_ORDER + 2];
@@ -279,14 +281,25 @@ namespace utec {
             struct Metadata {
                 long root_id{1};
                 long count{0};
+                long size{0};
+                long erase{-1};
             } header;
 
         private:
             std::shared_ptr<pagemanager> pm;
 
             Node<> new_node() {
-                header.count++;
-                Node<> ret{header.count+1};
+                Node<> ret;
+                if(header.erase == -1){
+                    header.count++;
+                    header.size++;
+                    ret.page_id = header.count+1;
+                } else {
+                    header.size++;
+                    ret.page_id = header.erase;
+                    Node<> lnode = read_node(header.erase);
+                    header.erase = lnode.erase;
+                }
                 pm->save(0, header);
                 return ret;
             }
@@ -371,7 +384,7 @@ namespace utec {
                 write_node(tnode.page_id, tnode);
             }
 
-            void split_root(Node<2*F_BLOCK> &root){
+            void splitRoot(Node<2*F_BLOCK> &root){
                 Node<> left = new_node();
                 Node<> right = new_node();
                 T middle = root.keys[F_BLOCK];
@@ -450,6 +463,11 @@ namespace utec {
                 }
                 node.count--;
 
+                n3.erase = header.erase;
+                header.erase = n3.page_id;
+                header.size--;
+                pm->save(0, header);
+
                 write_node(node.page_id, node);
                 write_node(n1.page_id, n1);
                 write_node(n2.page_id, n2);
@@ -466,6 +484,12 @@ namespace utec {
                 node.count += n1.count;
                 node.copy(n2, n1.count+1, n2.count+n1.count+1, -n1.count-1);
                 node.count += n2.count;
+
+                n1.erase = header.erase;
+                n2.erase = n1.page_id;
+                header.erase = n2.page_id;
+                header.size -= 2;
+                pm->save(0, header);
 
                 write_node(node.page_id, node);
                 write_node(n1.page_id, n1);
@@ -569,6 +593,54 @@ namespace utec {
             }
 
 
+            template <int SIZE>
+            void dfs(Node<SIZE> &ptr) {
+                int i;
+                for (i = 0; i < ptr.count; i++) {
+                    std::cout << ptr.keys[i] << ' ';
+                    if (ptr.children[i]) {
+                        Node<> child = read_node(ptr.children[i]);
+                        dfs(child);
+                    }
+                }
+                if (ptr.children[i]) {
+                    Node<> child = read_node(ptr.children[i]);
+                    dfs(child);
+                }
+            }
+
+
+            template <int SIZE>
+            void bfs(Node<SIZE> &ptr) {
+                std::queue<long> q;
+                int i;
+
+                for (i = 0; i < ptr.count; i++) {
+                    std::cout << ptr.keys[i] << ' ';
+                    if (ptr.children[i]) {
+                        q.push(ptr.children[i]);
+                    }
+                }
+                if (ptr.children[i]) {
+                    q.push(ptr.children[i]);
+                }
+
+                Node<> node;
+                while(!q.empty()){
+                    long id = q.front(); q.pop();
+                    node = read_node(id);
+                    for (i = 0; i < node.count; i++) {
+                        std::cout << node.keys[i] << ' ';
+                        if (node.children[i]) {
+                            q.push(node.children[i]);
+                        }
+                    }
+                    if (node.children[i]) {
+                        q.push(node.children[i]);
+                    }
+                }
+            }
+
 
             template <int SIZE>
             void print_tree(Node<SIZE> &ptr, int level) {
@@ -588,6 +660,7 @@ namespace utec {
                     print_tree(child, level + 1);
                 }
             }
+
 
             template <int SIZE>
             void print(Node<SIZE> &ptr, int level, std::ostream& out) {
@@ -623,7 +696,7 @@ namespace utec {
                 Node<2*F_BLOCK> root = read_root();
                 insert(k,root);
                 if(root.count > F_BLOCK*2){
-                    split_root(root);
+                    splitRoot(root);
                 }
                 write_node(root.page_id, root);
             }
@@ -648,6 +721,16 @@ namespace utec {
             iterator end() {
                 iterator it(this->pm);
                 return it;
+            }
+
+            void dfs() {
+                Node<2*F_BLOCK> root = read_root();
+                dfs(root);
+            }
+
+            void bfs() {
+                Node<2*F_BLOCK> root = read_root();
+                bfs(root);
             }
 
             void print_tree() {
